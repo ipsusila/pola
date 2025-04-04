@@ -1,0 +1,13 @@
+var fmt, time, cust = import("fmt"), import("time"), import("custom")
+
+func main() {
+    fmt.Println("Hello world!")
+    fmt.Printf("Current time is: %s\n", time.Now().Format(cust.RFC3339))
+}
+
+// call it
+main()
+d = make(cust.Descriptor)
+d.Name = "Me"
+d.Desc = "Descriptor set at script"
+

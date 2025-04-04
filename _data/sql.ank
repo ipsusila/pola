@@ -1,0 +1,6 @@
+// sqlite testing
+var sql = import("database/sql")
+println("Drivers:", sql.Drivers())
+
+lvl = sql.LevelReadCommitted
+println("Level: ", lvl, ",new: ", sql.LevelSnapshot, "Int:", toInt(sql.LevelReadUncommitted))

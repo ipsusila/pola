@@ -1,0 +1,19 @@
+// list known variables
+
+if defined("__host__") {
+	h = __host__
+	println("OS:", h.OS)
+	println("Arch:", h.Arch)
+	println("Name:", h.Name)
+	println("#Cpu:", h.NumCpu)
+	println("Version:", h.Version)
+}
+
+if defined("__runtime__") {
+	rt = __runtime__
+	cl = rt.AddCloser(nil)
+	printf("Add closer: %T -> %#v\n", cl, cl)
+	println("Error: ", cl.Close())
+}
+
+println("=== DONE ===")

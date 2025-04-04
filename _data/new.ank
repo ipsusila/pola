@@ -1,0 +1,20 @@
+// using new/make etc
+var time = import("time")
+var context = import("context")
+
+t = make(time.Time)
+printf("T = `%T` -> `%#v`\n", t, t)
+
+tn = new(time.Time)
+printf("T = `%T` -> `%#v`\n", tn, tn)
+
+mm = make(map[string]interface)
+printf("T = `%T` -> `%#v`\n", mm, mm)
+
+mp = new(map[string]interface)
+printf("T = `%T` -> `%#v`\n", mp, mp)
+
+ctx = context.TODO()
+rt = __runtime__
+printf("T = `%T` -> `%#v`\n", ctx, ctx)
+printf("T = `%T` -> `%#v`\n", rt.Ctx, rt.Ctx)

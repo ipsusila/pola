@@ -1,0 +1,15 @@
+// print argv
+func printArg(argv ...) {
+	for arg in argv {
+		println("Arg:", arg)
+	}
+}
+
+if defined("__runtime__") {
+	rt = __runtime__
+	printArg(rt.Argv)
+}
+
+if defined("toInt") {
+	println("toInt is defined")
+}

@@ -1,0 +1,26 @@
+// Test WaitGroup
+var fmt, time, sync = import("fmt"), import("time"), import("sync")
+
+func worker(id) {
+    fmt.Printf("Worker %d starting\n", id)
+
+    // sleep a moment
+    time.Sleep(time.Second)
+    fmt.Printf("Worker %d done\n", id)
+}
+
+func main() {
+    wg = new(sync.WaitGroup)
+    printf("Wg: %T -> %#v\n", wg, wg)
+    for i = 1; i <= 5; i++ {
+        wg.Add(1)
+
+        go func(idx) {
+            worker(idx)
+            wg.Done()
+        }(i)
+    }
+    wg.Wait()
+}
+
+main()
