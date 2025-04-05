@@ -9,13 +9,13 @@ import (
 // list of packages
 var (
 	Pkgs = map[string]map[string]reflect.Value{
-		"database/sql": valDatabaseSql,
+		//"database/sql": valDatabaseSql,
 		//"context":      valContext,
 		//"jmoiron/sqlx": valJmoironSqlx,
 	}
 
 	PkgTypes = map[string]map[string]reflect.Type{
-		"database/sql": typDatabaseSql,
+		//"database/sql": typDatabaseSql,
 		//"jmoiron/sqlx": typJmoironSqlx,
 	}
 )

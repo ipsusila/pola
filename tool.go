@@ -1,0 +1,302 @@
+package pola
+
+import (
+	"errors"
+	"go/build"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"unicode"
+
+	"golang.org/x/mod/modfile"
+)
+
+var (
+	ErrInvalidSemVer = errors.New("invalid Semantic Version")
+	reSemVer         = regexp.MustCompile(`[0-9]{1,}\.[0-9]{1,}\.[0-9]{1,}`)
+	reCharBeg        = regexp.MustCompile(`^[0-9a-zA-Z\!\~]`)
+)
+
+type GoPackageHint struct {
+	Domain     string
+	RelPath    string
+	ImportPath string
+	SrcDir     string
+	IsStdPkg   bool
+	GoVersion  string
+	Version    string
+	HasGoMod   bool
+	Valid      bool
+}
+
+type GoPackageHints struct {
+	BaseDir string
+	Hints   []*GoPackageHint
+}
+
+func (g *GoPackageHint) validVarName(c rune) rune {
+	if c == '_' {
+		return c
+	}
+	if '0' <= c && c <= '9' {
+		return c
+	}
+	if 'a' <= c && c <= 'z' {
+		return c
+	}
+	if 'A' <= c && c <= 'Z' {
+		return c
+	}
+
+	return '_'
+}
+
+func (g *GoPackageHint) SanitizeImportPath() {
+	up := false
+	sb := strings.Builder{}
+	for _, c := range g.ImportPath {
+		if c == '!' {
+			up = true
+		} else if up {
+			sb.WriteRune(unicode.ToUpper(c))
+			up = false
+		} else {
+			sb.WriteRune(c)
+		}
+	}
+	g.ImportPath = sb.String()
+}
+
+func (g *GoPackageHint) ID() string {
+	if g.IsStdPkg {
+		return g.ImportPath + "@v" + g.Version
+	}
+	return g.RelPath
+}
+func (g *GoPackageHint) GoVariableName() string {
+	up := false
+	sb := strings.Builder{}
+	for _, c := range g.RelPath {
+		if c == '!' {
+			up = true
+		} else if up {
+			up = false
+			sb.WriteRune(unicode.ToUpper(c))
+		} else {
+			sb.WriteRune(g.validVarName(c))
+		}
+	}
+	return sb.String()
+}
+
+func (g *GoPackageHint) OutputFilename() string {
+	up := false
+	sb := strings.Builder{}
+	for _, c := range g.RelPath {
+		if c == os.PathSeparator {
+			sb.WriteRune('_')
+		} else if c == '!' {
+			up = true
+		} else if up {
+			up = false
+			sb.WriteRune(unicode.ToUpper(c))
+		} else {
+			sb.WriteRune(c)
+		}
+	}
+	if g.IsStdPkg {
+		return sb.String() + "_v" + g.Version + ".go"
+	}
+	return sb.String() + ".go"
+}
+
+func pkgIgnoreDir(name string) bool {
+	if !reCharBeg.MatchString(name) {
+		return true
+	}
+	excludes := []string{"vendor", "internal", "cmd", "go", "testdata", "builtin"}
+	for _, ex := range excludes {
+		if name == ex {
+			return true
+		}
+	}
+	return false
+}
+
+func IsGoSrcDir(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			if ent.Name() == "go.mod" {
+				return true
+			}
+			if strings.ToLower(filepath.Ext(ent.Name())) == ".go" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func GoPath() string {
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		gopath = build.Default.GOPATH
+	}
+	return gopath
+}
+
+func GetGoModHint(base, dir string) (*GoPackageHint, error) {
+	if !IsGoSrcDir(dir) {
+		return nil, nil
+	}
+
+	name := "go.mod"
+	gmFile := filepath.Join(dir, name)
+	data, err := os.ReadFile(gmFile)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	hint := GoPackageHint{
+		IsStdPkg: false,
+		SrcDir:   dir,
+		HasGoMod: err == nil,
+	}
+	if rel, err := filepath.Rel(base, dir); err == nil {
+		hint.RelPath = rel
+
+		version := reSemVer.FindString(rel)
+		if version != "" {
+			hint.Version = version
+		}
+		if idx := strings.IndexRune(rel, '@'); idx > 0 {
+			hint.ImportPath = rel[:idx]
+			hint.SanitizeImportPath()
+		}
+	}
+
+	// parse go mod if exists
+	if hint.HasGoMod {
+		gm, err := modfile.Parse(gmFile, data, nil)
+		if err != nil {
+			return nil, err
+		}
+		//return nil, err
+		if gm.Go != nil {
+			hint.GoVersion = gm.Go.Version
+		}
+		if gm.Module != nil {
+			hint.ImportPath = gm.Module.Mod.Path
+		}
+	}
+
+	return &hint, nil
+}
+
+func GetGoPackageHints(domain string, rootDir ...string) (*GoPackageHints, error) {
+	// layout > go/pkg/mod/github.com/!burnt!sushi/toml@v1.5.0
+	// go.mod > module github.com/BurntSushi/toml
+	// no go.mod > /go/pkg/mod/github.com/k0kubun/pp@v3.0.1+incompatible
+	goBase, err := filepath.Abs(GoPath())
+	if err != nil {
+		return nil, err
+	}
+	if len(rootDir) > 0 && rootDir[0] != "" {
+		goBase = rootDir[0]
+	}
+
+	// get srcBaseDir for specific domain
+	modBase := filepath.Join(goBase, "pkg", "mod")
+	srcBaseDir := filepath.Join(modBase, domain)
+	hints := GoPackageHints{
+		BaseDir: srcBaseDir,
+	}
+
+	wderr := filepath.WalkDir(srcBaseDir, func(path string, d fs.DirEntry, err error) error {
+		if d == nil {
+			return os.ErrNotExist
+		} else if d.Name() == "." || !d.IsDir() {
+			return nil
+		}
+
+		if pkgIgnoreDir(d.Name()) {
+			return filepath.SkipDir
+		}
+
+		hint, err := GetGoModHint(modBase, path)
+		if err != nil {
+			return err
+		} else if hint != nil {
+			hint.Domain = domain
+			hints.Hints = append(hints.Hints, hint)
+			return filepath.SkipDir
+		}
+		return nil
+	})
+
+	return &hints, wderr
+}
+
+func GetStdGoPackageHints(version string, rootDir ...string) (*GoPackageHints, error) {
+	sdkBase := ""
+	if len(rootDir) > 0 && rootDir[0] != "" {
+		sdkBase = rootDir[0]
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		sdkBase = home
+	}
+
+	// sanitize version
+	// remove non digit
+	version = reSemVer.FindString(version)
+	if version == "" {
+		return nil, ErrInvalidSemVer
+	}
+
+	srcBaseDir := filepath.Join(sdkBase, "sdk", "go"+version, "src")
+	hints := GoPackageHints{
+		BaseDir: sdkBase,
+	}
+	wderr := filepath.WalkDir(srcBaseDir, func(path string, d fs.DirEntry, err error) error {
+		if d == nil {
+			return os.ErrNotExist
+		} else if d.Name() == "." || !d.IsDir() {
+			return nil
+		}
+
+		if pkgIgnoreDir(d.Name()) {
+			return filepath.SkipDir
+		}
+		rel, err := filepath.Rel(srcBaseDir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." || rel == ".." {
+			return nil
+		}
+
+		if IsGoSrcDir(path) {
+			hint := GoPackageHint{
+				RelPath:    rel,
+				ImportPath: rel,
+				SrcDir:     path,
+				Version:    version,
+				IsStdPkg:   true,
+				GoVersion:  "", // TODO
+			}
+			hints.Hints = append(hints.Hints, &hint)
+		}
+		return nil
+	})
+
+	return &hints, wderr
+}

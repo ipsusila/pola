@@ -10,9 +10,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/ipsusila/pola"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+)
+
+const (
+	KindStruct = iota
+	KindFunction
+	KindVar
+	KindConst
 )
 
 type Ident struct {
@@ -23,23 +32,76 @@ type Ident struct {
 }
 
 type InspectionResult struct {
-	Prefix  string // prefix given
 	PkgName string // package name
 	Structs []Ident
 	Funcs   []Ident
 	Consts  []Ident
 	Vars    []Ident
+	Hint    *pola.GoPackageHint
 
-	mVals map[string]bool
-	mTyps map[string]bool
+	mVals  map[string]bool
+	mTyps  map[string]bool
+	cTitle cases.Caser
+}
+
+type InspectionArg struct {
+	Prefix     string
+	SrcDir     string
+	Imports    []string
+	TargetPkg  string
+	TargetFile string
+	Version    string
+}
+
+/*
+func makeStdInspectionArg(version, pkgPath, tgtPkgName, outDir string) ([]*InspectionArg, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	stdSrcDir := fmt.Sprintf("%s/sdk/go%s/src/", homeDir, goVersion)
+	inpPkgs := strings.Split(pkgPath, "/")
+	fileName := strings.Join(inpPkgs, ".") + ".go"
+	if srcDir == "" {
+		items := append([]string{stdSrcDir}, inpPkgs...)
+		srcDir = filepath.Join(items...)
+	}
+
+	prefix := ""
+	if n := len(inpPkgs) - 1; n > 0 {
+		cText := cases.Title(language.Und, cases.NoLower)
+		for i := 0; i < n; i++ {
+			prefix += cText.String(inpPkgs[i])
+		}
+	}
+	return &InspectionArg{
+		Prefix:     prefix,
+		Imports:    []string{pkgPath},
+		SrcDir:     srcDir,
+		TargetPkg:  tgtPkgName,
+		TargetFile: filepath.Join(outDir, fileName),
+	}, nil
+}
+*/
+
+func (i InspectionArg) String() string {
+	sb := strings.Builder{}
+	fmt.Fprintf(&sb, "Prefix:     %s\n", i.Prefix)
+	fmt.Fprintf(&sb, "SrcDir:     %s\n", i.SrcDir)
+	fmt.Fprintf(&sb, "Imports:    %v\n", i.Imports)
+	fmt.Fprintf(&sb, "TargetPkg:  %s\n", i.TargetPkg)
+	fmt.Fprintf(&sb, "TargetFile: %s\n", i.TargetFile)
+	fmt.Fprintf(&sb, "Version:    %s\n", i.Version)
+
+	return sb.String()
 }
 
 func NewInspectionResult() *InspectionResult {
 	return &InspectionResult{
-		mVals: make(map[string]bool),
-		mTyps: make(map[string]bool),
+		mVals:  make(map[string]bool),
+		mTyps:  make(map[string]bool),
+		cTitle: cases.Title(language.Und, cases.NoLower),
 	}
-
 }
 
 func (r *InspectionResult) Sort() {
@@ -56,6 +118,24 @@ func (r *InspectionResult) Sort() {
 		return r.Vars[i].Name < r.Vars[j].Name
 	})
 }
+func (r *InspectionResult) HasExportedValue() bool {
+	for _, v := range r.Funcs {
+		if v.Exported && !v.HasParam {
+			return true
+		}
+	}
+	for _, v := range r.Vars {
+		if v.Exported && !v.HasParam {
+			return true
+		}
+	}
+	for _, v := range r.Consts {
+		if v.Exported && !v.HasParam {
+			return true
+		}
+	}
+	return false
+}
 func (r *InspectionResult) HasValueId(name string) bool {
 	if r.mVals != nil {
 		return r.mVals[name]
@@ -66,6 +146,15 @@ func (r *InspectionResult) AddValueId(name string) {
 	if r.mVals != nil {
 		r.mVals[name] = true
 	}
+}
+
+func (r *InspectionResult) HasExportedType() bool {
+	for _, v := range r.Structs {
+		if v.Exported && !v.HasParam {
+			return true
+		}
+	}
+	return false
 }
 func (r *InspectionResult) HasTypesId(name string) bool {
 	if r.mTyps != nil {
@@ -79,84 +168,114 @@ func (r *InspectionResult) AddTypesId(name string) {
 	}
 }
 func (r *InspectionResult) ValueName() string {
-	return "val" + r.prefixAndName()
+	pfx := "val"
+	if r.Hint != nil {
+		pfx += r.Hint.GoVariableName()
+	}
+	return pfx
 }
 func (r *InspectionResult) TypeName() string {
-	return "typ" + r.prefixAndName()
+	pfx := "typ"
+	if r.Hint != nil {
+		pfx += r.Hint.GoVariableName()
+	}
+	return pfx
 }
-func (r *InspectionResult) prefixAndName() string {
-	camel := cases.Title(language.Und, cases.NoLower)
-	return camel.String(r.Prefix) + camel.String(r.PkgName)
-}
-func (r *InspectionResult) FPrint(w io.Writer, targetPkg string, impName ...string) {
-	//vals := strings.Builder{}
-	prtIdent := func(w io.Writer, comment, kind, brace string, idts []Ident) {
-		if len(idts) == 0 {
-			return
-		}
-
-		hasItem := false
-		sb := strings.Builder{}
-		for _, id := range idts {
-			if !id.Exported || id.HasParam {
-				continue
-			}
-			item := fmt.Sprintf(`    "%s": reflect.%s(%s.%s%s),`, id.Name, kind, r.PkgName, id.Name, brace)
-			fmt.Fprintln(&sb, item)
-			hasItem = true
-		}
-		if hasItem {
-			fmt.Fprintln(w, "    //"+comment)
-			fmt.Fprint(w, sb.String())
+func (r *InspectionResult) MaxNameLen(ids []Ident) int {
+	n := 0
+	for _, id := range ids {
+		if id.Exported && !id.HasParam {
+			n = max(n, len(id.Name))
 		}
 	}
-	vals := strings.Builder{}
-	prtIdent(&vals, "Function(s)", "ValueOf", "", r.Funcs)
-	prtIdent(&vals, "Variable(s)", "ValueOf", "", r.Vars)
-	prtIdent(&vals, "Constant(s)", "ValueOf", "", r.Consts)
-	if vals.Len() == 0 {
+	return n
+}
+func (r *InspectionResult) printIdent(w io.Writer, comment, kind, brace string, idts []Ident) {
+	if len(idts) == 0 {
 		return
 	}
 
-	// generate importStmt
-	impStmt := ""
-	for i, imp := range impName {
-		if i == 0 {
-			impStmt += fmt.Sprintln()
+	hasItem := false
+	sb := strings.Builder{}
+	nl := r.MaxNameLen(idts)
+	for _, id := range idts {
+		if !id.Exported || id.HasParam {
+			continue
 		}
-		impStmt += fmt.Sprintln(`    "` + imp + `"`)
+		sp := strings.Repeat(" ", nl-len(id.Name)+1)
+		item := fmt.Sprintf(`    "%s":%sreflect.%s(%s.%s%s),`, id.Name, sp, kind, r.PkgName, id.Name, brace)
+		fmt.Fprintln(&sb, item)
+		hasItem = true
 	}
-
-	// add values
-	const tplVals = `// Auto-generated code.
-package %s
-
-import (
-    "reflect"
-
-	%s
-)
-
-var %s = map[string]reflect.Value{
-%s}
-`
-	fmt.Fprintf(w, tplVals, targetPkg, impStmt, r.ValueName(), vals.String())
-
-	// Add types
-	typs := strings.Builder{}
-	prtIdent(&typs, "Struct(s)", "TypeOf", "{}", r.Structs)
-
-	// format string
-	const tplTyps = `
-var %s = map[string]reflect.Type{
-%s}
-`
-	//strTyps := fmt.Sprintf(t)
-	fmt.Fprintf(w, tplTyps, r.TypeName(), typs.String())
+	if hasItem {
+		fmt.Fprintln(w, "    //"+comment)
+		fmt.Fprint(w, sb.String())
+	}
+}
+func (r *InspectionResult) titleCases(txts ...string) string {
+	resText := ""
+	for _, txt := range txts {
+		if len(txt) > 0 {
+			resText += r.cTitle.String(txt)
+		}
+	}
+	return resText
 }
 
-func InspectDir(res *InspectionResult, dir, prefix string) error {
-	absDir, err := filepath.Abs(dir)
+func (r *InspectionResult) WriteFile(name string, targetPkg string, impName ...string) error {
+	if !(r.HasExportedValue() || r.HasExportedType()) {
+		return nil
+	}
+	fd, err := os.Create(name)
+	if err != nil {
+		return err
+	}
+	defer fd.Close()
+
+	r.doFprint(fd, targetPkg, impName...)
+	return nil
+}
+func (r *InspectionResult) Fprint(w io.Writer, targetPkg string, impName ...string) {
+	if r.HasExportedValue() || r.HasExportedType() {
+		r.doFprint(w, targetPkg, impName...)
+	}
+}
+func (r *InspectionResult) doFprint(w io.Writer, targetPkg string, impName ...string) {
+	fmt.Fprintln(w, "// Auto generated code, at", time.Now().Format(time.RFC3339))
+	fmt.Fprintln(w, "package", targetPkg)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "import (")
+	fmt.Fprintln(w, `    "reflect"`)
+	for _, imp := range impName {
+		fmt.Fprintf(w, `    "%s"`, imp)
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w, ")")
+	fmt.Fprintln(w)
+
+	// print value
+	hasVal := r.HasExportedValue()
+	if hasVal {
+		fmt.Fprintf(w, "var %s = map[string]reflect.Value{\n", r.ValueName())
+		r.printIdent(w, "Function(s)", "ValueOf", "", r.Funcs)
+		r.printIdent(w, "Variables(s)", "ValueOf", "", r.Vars)
+		r.printIdent(w, "Constants(s)", "ValueOf", "", r.Consts)
+		fmt.Fprintln(w, "}")
+	}
+
+	// print types
+	if r.HasExportedType() {
+		if hasVal {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "var %s = map[string]reflect.Type{\n", r.TypeName())
+		r.printIdent(w, "Struct(s)", "TypeOf", "{}", r.Structs)
+		fmt.Fprintln(w, "}")
+	}
+}
+
+func InspectDir(res *InspectionResult, hint *pola.GoPackageHint) error {
+	absDir, err := filepath.Abs(hint.SrcDir)
 	if err != nil {
 		return err
 	}
@@ -175,7 +294,7 @@ func InspectDir(res *InspectionResult, dir, prefix string) error {
 		}
 		ext := filepath.Ext(loName)
 		if ext == ".go" {
-			err := InspectGoFile(res, filepath.Join(absDir, e.Name()), prefix)
+			err := InspectGoFile(res, hint, filepath.Join(absDir, e.Name()))
 			if err != nil {
 				return err
 			}
@@ -184,7 +303,7 @@ func InspectDir(res *InspectionResult, dir, prefix string) error {
 	return nil
 }
 
-func InspectGoFile(res *InspectionResult, srcPath, prefix string) error {
+func InspectGoFile(res *InspectionResult, hint *pola.GoPackageHint, srcPath string) error {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, srcPath, nil, 0)
 	if err != nil {
@@ -193,12 +312,12 @@ func InspectGoFile(res *InspectionResult, srcPath, prefix string) error {
 
 	// package name
 	if name := f.Name; name != nil {
-		if name.Name == "main" {
+		if name.Name == "main" || name.Name == "internal" || strings.HasSuffix(name.Name, "_test") {
 			return nil
 		}
 		res.PkgName = name.Name
 	}
-	res.Prefix = prefix
+	res.Hint = hint
 
 	// search for: struct, func, var, const
 	// print all function calls
