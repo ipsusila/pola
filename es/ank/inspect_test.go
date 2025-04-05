@@ -13,20 +13,15 @@ func TestGenStdPackages(t *testing.T) {
 	tgtPkgName := "std"
 	err := ank.GenerateStdPackages(goVer, rootPkgDir, tgtPkgName)
 	assert.NoError(t, err)
+}
 
-	/*
-
-		targetPkg = "usr"
-		outDir = filepath.Join("pkg", targetPkg)
-		hints2, err := pola.GetGoPackageHints("github.com")
-		assert.NoError(t, err)
-		for _, h := range hints2.Hints {
-			res := ank.NewInspectionResult()
-			if err := ank.InspectDir(res, h); err == nil {
-				tp := filepath.Join(outDir, h.OutputFilename())
-				res.WriteFile(tp, targetPkg, h.ImportPath)
-			}
-		}
-	*/
-
+func TestGenCurrent(t *testing.T) {
+	pkgVer := ""
+	pkgImport := "github.com/ipsusila/pola/es/ank"
+	pkgSrcDir := "."
+	tgtOutPkgDir := "tst"
+	tgtOutPkg := "usr"
+	rootDirs := []string{}
+	err := ank.GenerateCustomPackages(pkgVer, pkgImport, pkgSrcDir, tgtOutPkgDir, tgtOutPkg, rootDirs...)
+	assert.NotNil(t, err)
 }

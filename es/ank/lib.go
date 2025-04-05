@@ -68,14 +68,17 @@ func GenerateStdPackages(goVer, rootPkgDir, tgtPkgName string, rootDir ...string
 	if err != nil {
 		return err
 	}
+	if goVer == "" {
+		goVer = hints.GoVersion
+	}
 
 	vDir := "go" + goVer
 	outDir := filepath.Join(rootPkgDir, vDir, tgtPkgName)
 	return generatePackagesFromHints(hints, outDir, tgtPkgName)
 }
 
-func GenerateCustomPackages(version, importPath, rootPkgDir, tgtPkgName string, rootDir ...string) error {
-	hints, err := pola.GetGoPackageHints(version, importPath, rootDir...)
+func GenerateCustomPackages(version, importPath, pkgSrcDir, rootPkgDir, tgtPkgName string, rootDir ...string) error {
+	hints, err := pola.GetGoPackageHints(version, importPath, pkgSrcDir, rootDir...)
 	if err != nil {
 		return err
 	}

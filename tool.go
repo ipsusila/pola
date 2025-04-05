@@ -2,6 +2,7 @@ package pola
 
 import (
 	"errors"
+	"fmt"
 	"go/build"
 	"io/fs"
 	"os"
@@ -20,20 +21,21 @@ var (
 )
 
 type GoPackageHint struct {
-	Domain     string
-	RelPath    string
-	ImportPath string
-	SrcDir     string
-	IsStdPkg   bool
-	GoVersion  string
-	Version    string
-	HasGoMod   bool
-	Valid      bool
+	Domain       string
+	RelPath      string
+	ImportPath   string
+	SrcDir       string
+	IsStdPkg     bool
+	ModGoVersion string
+	Version      string
+	HasGoMod     bool
+	Valid        bool
 }
 
 type GoPackageHints struct {
-	BaseDir string
-	Hints   []*GoPackageHint
+	BaseDir   string
+	GoVersion string
+	Hints     []*GoPackageHint
 }
 
 func (g *GoPackageHint) validVarName(c rune) rune {
@@ -158,8 +160,22 @@ func GoPath() string {
 	}
 	return gopath
 }
+func GoRoot() string {
+	goroot := os.Getenv("GOROOT")
+	if goroot == "" {
+		goroot = build.Default.GOROOT
+	}
+	return goroot
+}
+func GoVersion() string {
+	gover := os.Getenv("GOVERSION")
+	if gover == "" {
+		gover = reSemVer.FindString(GoRoot())
+	}
+	return gover
+}
 
-func GetGoModHint(base, dir string) (*GoPackageHint, error) {
+func GetGoModHint(base, importDirective, dir string) (*GoPackageHint, error) {
 	if !IsGoSrcDir(dir) {
 		return nil, nil
 	}
@@ -176,7 +192,17 @@ func GetGoModHint(base, dir string) (*GoPackageHint, error) {
 		SrcDir:   dir,
 		HasGoMod: err == nil,
 	}
-	if rel, err := filepath.Rel(base, dir); err == nil {
+
+	if base == "" {
+		hint.Version = "0.0.0"
+		hint.ImportPath = importDirective
+		items := strings.Split(importDirective, "/")
+		if len(items) > 1 {
+			hint.RelPath = strings.Join(items[1:], "/")
+		} else {
+			hint.RelPath = importDirective
+		}
+	} else if rel, err := filepath.Rel(base, dir); err == nil {
 		hint.RelPath = rel
 
 		version := reSemVer.FindString(rel)
@@ -197,17 +223,21 @@ func GetGoModHint(base, dir string) (*GoPackageHint, error) {
 		}
 		//return nil, err
 		if gm.Go != nil {
-			hint.GoVersion = gm.Go.Version
+			hint.ModGoVersion = gm.Go.Version
 		}
 		if gm.Module != nil {
 			hint.ImportPath = gm.Module.Mod.Path
 		}
+
+		// std path
+		// TODO: is correct (?)
+		//hint.IsStdPkg = hint.ImportPath == "std"
 	}
 
 	return &hint, nil
 }
 
-func GetGoPackageHints(tgtVer, tgtImport string, rootDir ...string) (*GoPackageHints, error) {
+func GetGoPackageHints(tgtVer, tgtImport, pkgSrcDir string, rootDir ...string) (*GoPackageHints, error) {
 	// layout > go/pkg/mod/github.com/!burnt!sushi/toml@v1.5.0
 	// go.mod > module github.com/BurntSushi/toml
 	// no go.mod > /go/pkg/mod/github.com/k0kubun/pp@v3.0.1+incompatible
@@ -218,7 +248,6 @@ func GetGoPackageHints(tgtVer, tgtImport string, rootDir ...string) (*GoPackageH
 	if len(rootDir) > 0 && rootDir[0] != "" {
 		goBase = rootDir[0]
 	}
-
 	// get domain information
 	domain := "unknown"
 	items := strings.Split(tgtImport, "/")
@@ -226,11 +255,23 @@ func GetGoPackageHints(tgtVer, tgtImport string, rootDir ...string) (*GoPackageH
 		domain = items[0]
 	}
 
-	// get srcBaseDir for specific domain
-	modBase := filepath.Join(goBase, "pkg", "mod")
-	srcBaseDir := filepath.Join(modBase, domain)
+	var srcBaseDir, modBase string
+	if pkgSrcDir == "" {
+		// get srcBaseDir for specific domain
+		modBase = filepath.Join(goBase, "pkg", "mod")
+		srcBaseDir = filepath.Join(modBase, domain)
+	} else {
+		modBase = ""
+		absPath, err := filepath.Abs(pkgSrcDir)
+		if err != nil {
+			return nil, err
+		}
+		srcBaseDir = absPath
+	}
+
 	hints := GoPackageHints{
-		BaseDir: srcBaseDir,
+		BaseDir:   srcBaseDir,
+		GoVersion: GoVersion(),
 	}
 
 	// get matching version and import path only
@@ -245,7 +286,7 @@ func GetGoPackageHints(tgtVer, tgtImport string, rootDir ...string) (*GoPackageH
 			return filepath.SkipDir
 		}
 
-		hint, err := GetGoModHint(modBase, path)
+		hint, err := GetGoModHint(modBase, tgtImport, path)
 		if err != nil {
 			return err
 		} else if hint != nil {
@@ -273,17 +314,25 @@ func GetStdGoPackageHints(version string, rootDir ...string) (*GoPackageHints, e
 		}
 		sdkBase = home
 	}
-
-	// sanitize version
-	// remove non digit
-	version = reSemVer.FindString(version)
-	if version == "" {
-		return nil, ErrInvalidSemVer
+	var srcBaseDir string
+	if version != "" {
+		// sanitize version
+		// remove non digit
+		version = reSemVer.FindString(version)
+		if version == "" {
+			return nil, ErrInvalidSemVer
+		}
+		srcBaseDir = filepath.Join(sdkBase, "sdk", "go"+version, "src")
+	} else {
+		sdkBase = GoRoot()
+		version = GoVersion()
+		srcBaseDir = filepath.Join(sdkBase, "src")
 	}
+	fmt.Println("BaseSrc:", srcBaseDir, ">version:", version)
 
-	srcBaseDir := filepath.Join(sdkBase, "sdk", "go"+version, "src")
 	hints := GoPackageHints{
-		BaseDir: sdkBase,
+		BaseDir:   sdkBase,
+		GoVersion: version,
 	}
 	wderr := filepath.WalkDir(srcBaseDir, func(path string, d fs.DirEntry, err error) error {
 		if d == nil {
@@ -305,12 +354,12 @@ func GetStdGoPackageHints(version string, rootDir ...string) (*GoPackageHints, e
 
 		if IsGoSrcDir(path) {
 			hint := GoPackageHint{
-				RelPath:    rel,
-				ImportPath: rel,
-				SrcDir:     path,
-				Version:    version,
-				IsStdPkg:   true,
-				GoVersion:  "", // TODO
+				RelPath:      rel,
+				ImportPath:   rel,
+				SrcDir:       path,
+				Version:      version,
+				IsStdPkg:     true,
+				ModGoVersion: "", // TODO
 			}
 			hints.Hints = append(hints.Hints, &hint)
 		}

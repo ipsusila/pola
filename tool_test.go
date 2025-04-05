@@ -14,8 +14,9 @@ func TestTool(t *testing.T) {
 	assert.NotEmpty(t, hints)
 
 	tgtVer := "" // any version is fine
-	targetPath := "github.com/BurntSushi/toml"
-	hints2, err := pola.GetGoPackageHints(tgtVer, targetPath)
+	pkgImport := "github.com/BurntSushi/toml"
+	pkgSrcDir := ""
+	hints2, err := pola.GetGoPackageHints(tgtVer, pkgImport, pkgSrcDir)
 	assert.NoError(t, err)
 
 	fmt.Println("=======================")
@@ -27,4 +28,10 @@ func TestTool(t *testing.T) {
 		fmt.Printf("[%s](%s) > %s\n", h.ImportPath, h.ID(), h.OutputFilename())
 	}
 
+}
+
+func TestGetDir(t *testing.T) {
+	gopath := pola.GoPath()
+	goroot := pola.GoRoot()
+	fmt.Println("Path:", gopath, "> Root:", goroot)
 }
