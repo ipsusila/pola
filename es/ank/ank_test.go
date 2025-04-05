@@ -7,8 +7,7 @@ import (
 
 	"github.com/ipsusila/pola/es"
 	"github.com/ipsusila/pola/es/ank"
-	"github.com/ipsusila/pola/es/ank/pkg"
-	"github.com/mattn/anko/vm"
+	"github.com/ipsusila/pola/es/ank/pkg/go1.23.0/std"
 	"github.com/stretchr/testify/assert"
 
 	_ "github.com/mattn/anko/packages"
@@ -46,8 +45,8 @@ func TestScript(t *testing.T) {
 		"sql.ank",
 	}
 
-	imp := vm.NewPackagesWithStdImporter(pkgs, types, "fmt", "time", "sync").
-		Append(vm.NewPackagesImporter(pkg.Pkgs, pkg.PkgTypes))
+	imp := std.NewImporter("fmt", "time", "sync", "database/sql", "context").
+		AppendMap(pkgs, types)
 	ex := ank.NewAnkoExecutor(
 		ank.Debug(),
 		ank.WithCorePackages(),
@@ -66,8 +65,8 @@ func TestFuncs(t *testing.T) {
 	dir := "../../_data"
 	file := "funcs.ank"
 
-	imp := vm.NewStdPackagesImporter("fmt", "time", "sync").
-		Append(vm.NewPackagesImporter(pkg.Pkgs, pkg.PkgTypes))
+	imp := std.NewImporter("fmt", "time", "sync").
+		AppendMap(pkgs, types)
 	ex := ank.NewAnkoExecutor(
 		ank.Debug(),
 		ank.WithCorePackages(),

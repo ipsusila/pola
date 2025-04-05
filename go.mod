@@ -10,7 +10,6 @@ require (
 	github.com/goccy/go-yaml v1.17.1
 	github.com/google/go-jsonnet v0.20.0
 	github.com/hjson/hjson-go/v4 v4.4.0
-	github.com/jmoiron/sqlx v1.4.0
 	github.com/mattn/anko v0.1.10
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/stretchr/testify v1.10.0

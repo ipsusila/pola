@@ -76,14 +76,14 @@ func (g *GoPackageHint) ID() string {
 	return g.RelPath
 }
 func (g *GoPackageHint) GoVariableName() string {
-	up := false
+	up := true
 	sb := strings.Builder{}
 	for _, c := range g.RelPath {
-		if c == '!' {
+		if c == '!' || c == os.PathSeparator {
 			up = true
 		} else if up {
 			up = false
-			sb.WriteRune(unicode.ToUpper(c))
+			sb.WriteRune(unicode.ToUpper(g.validVarName(c)))
 		} else {
 			sb.WriteRune(g.validVarName(c))
 		}
@@ -92,11 +92,17 @@ func (g *GoPackageHint) GoVariableName() string {
 }
 
 func (g *GoPackageHint) OutputFilename() string {
+	ps := '_'
+	if g.IsStdPkg {
+		ps = '.'
+	}
 	up := false
 	sb := strings.Builder{}
 	for _, c := range g.RelPath {
-		if c == os.PathSeparator {
+		if c == '@' {
 			sb.WriteRune('_')
+		} else if c == os.PathSeparator || c == '/' {
+			sb.WriteRune(ps)
 		} else if c == '!' {
 			up = true
 		} else if up {
@@ -106,17 +112,19 @@ func (g *GoPackageHint) OutputFilename() string {
 			sb.WriteRune(c)
 		}
 	}
-	if g.IsStdPkg {
-		return sb.String() + "_v" + g.Version + ".go"
+	if !g.IsStdPkg {
+		sb.WriteString("_v")
+		sb.WriteString(g.Version)
 	}
-	return sb.String() + ".go"
+	sb.WriteString(".go")
+	return sb.String()
 }
 
 func pkgIgnoreDir(name string) bool {
 	if !reCharBeg.MatchString(name) {
 		return true
 	}
-	excludes := []string{"vendor", "internal", "cmd", "go", "testdata", "builtin"}
+	excludes := []string{"vendor", "internal", "cmd", "go", "testdata", "builtin", "reflect", "syscall", "unsafe"}
 	for _, ex := range excludes {
 		if name == ex {
 			return true
@@ -199,7 +207,7 @@ func GetGoModHint(base, dir string) (*GoPackageHint, error) {
 	return &hint, nil
 }
 
-func GetGoPackageHints(domain string, rootDir ...string) (*GoPackageHints, error) {
+func GetGoPackageHints(tgtVer, tgtImport string, rootDir ...string) (*GoPackageHints, error) {
 	// layout > go/pkg/mod/github.com/!burnt!sushi/toml@v1.5.0
 	// go.mod > module github.com/BurntSushi/toml
 	// no go.mod > /go/pkg/mod/github.com/k0kubun/pp@v3.0.1+incompatible
@@ -211,6 +219,13 @@ func GetGoPackageHints(domain string, rootDir ...string) (*GoPackageHints, error
 		goBase = rootDir[0]
 	}
 
+	// get domain information
+	domain := "unknown"
+	items := strings.Split(tgtImport, "/")
+	if len(items) >= 2 {
+		domain = items[0]
+	}
+
 	// get srcBaseDir for specific domain
 	modBase := filepath.Join(goBase, "pkg", "mod")
 	srcBaseDir := filepath.Join(modBase, domain)
@@ -218,6 +233,7 @@ func GetGoPackageHints(domain string, rootDir ...string) (*GoPackageHints, error
 		BaseDir: srcBaseDir,
 	}
 
+	// get matching version and import path only
 	wderr := filepath.WalkDir(srcBaseDir, func(path string, d fs.DirEntry, err error) error {
 		if d == nil {
 			return os.ErrNotExist
@@ -233,8 +249,11 @@ func GetGoPackageHints(domain string, rootDir ...string) (*GoPackageHints, error
 		if err != nil {
 			return err
 		} else if hint != nil {
-			hint.Domain = domain
-			hints.Hints = append(hints.Hints, hint)
+			match := hint.ImportPath == tgtImport && (tgtVer == "" || hint.Version == tgtVer)
+			if match {
+				hint.Domain = domain
+				hints.Hints = append(hints.Hints, hint)
+			}
 			return filepath.SkipDir
 		}
 		return nil

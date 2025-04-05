@@ -13,7 +13,9 @@ func TestTool(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, hints)
 
-	hints2, err := pola.GetGoPackageHints("github.com")
+	tgtVer := "" // any version is fine
+	targetPath := "github.com/BurntSushi/toml"
+	hints2, err := pola.GetGoPackageHints(tgtVer, targetPath)
 	assert.NoError(t, err)
 
 	fmt.Println("=======================")

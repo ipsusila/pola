@@ -212,15 +212,6 @@ func (r *InspectionResult) printIdent(w io.Writer, comment, kind, brace string, 
 		fmt.Fprint(w, sb.String())
 	}
 }
-func (r *InspectionResult) titleCases(txts ...string) string {
-	resText := ""
-	for _, txt := range txts {
-		if len(txt) > 0 {
-			resText += r.cTitle.String(txt)
-		}
-	}
-	return resText
-}
 
 func (r *InspectionResult) WriteFile(name string, targetPkg string, impName ...string) error {
 	if !(r.HasExportedValue() || r.HasExportedType()) {
@@ -254,9 +245,12 @@ func (r *InspectionResult) doFprint(w io.Writer, targetPkg string, impName ...st
 	fmt.Fprintln(w)
 
 	// print value
+	valName := ""
+	typName := ""
 	hasVal := r.HasExportedValue()
 	if hasVal {
-		fmt.Fprintf(w, "var %s = map[string]reflect.Value{\n", r.ValueName())
+		valName = r.ValueName()
+		fmt.Fprintf(w, "var %s = map[string]reflect.Value{\n", valName)
 		r.printIdent(w, "Function(s)", "ValueOf", "", r.Funcs)
 		r.printIdent(w, "Variables(s)", "ValueOf", "", r.Vars)
 		r.printIdent(w, "Constants(s)", "ValueOf", "", r.Consts)
@@ -264,14 +258,28 @@ func (r *InspectionResult) doFprint(w io.Writer, targetPkg string, impName ...st
 	}
 
 	// print types
-	if r.HasExportedType() {
+	hasTyp := r.HasExportedType()
+	if hasTyp {
 		if hasVal {
 			fmt.Fprintln(w)
 		}
-		fmt.Fprintf(w, "var %s = map[string]reflect.Type{\n", r.TypeName())
+		typName = r.TypeName()
+		fmt.Fprintf(w, "var %s = map[string]reflect.Type{\n", typName)
 		r.printIdent(w, "Struct(s)", "TypeOf", "{}", r.Structs)
 		fmt.Fprintln(w, "}")
 	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "func init() {")
+	if hasVal {
+		fmt.Fprintf(w, `	Pkgs["%s"] = %s`, r.Hint.ImportPath, valName)
+		fmt.Fprintln(w)
+	}
+	if hasTyp {
+		fmt.Fprintf(w, `	PkgTypes["%s"] = %s`, r.Hint.ImportPath, typName)
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w, "}")
 }
 
 func InspectDir(res *InspectionResult, hint *pola.GoPackageHint) error {
