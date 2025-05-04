@@ -1,0 +1,40 @@
+// callback testing
+var io = import("io")
+
+func(x) {
+	return func(y) {
+	  x(y)
+	}
+}(func(z) {
+	println("Yay!", z)
+  })("hello world")
+  
+fna = func(argv ...) {
+	print("hello VM:")
+	println(argv...)
+	if len(argv) == 0 {
+		println()
+	}
+}
+
+func onResponse(data, data2, data3) {
+	println("Got data:", data, ">", data2, ">", data3)
+	fna(data, data2, data3)
+
+	//return map[interface]interface{"a":10, "b":"20"}, 20, 30, io.EOF
+	return 0, io.EOF
+}
+
+fn = func(a, b) {
+	return a * b
+}
+
+fnb = func (a, b) {
+	println("Do calculation in VM")
+	return a+b
+}
+__runtime__.Ret = fn
+//__runtime__.CB = fna
+//__runtime__.CbInt = fnb
+onResponse("Inside VM", 1, 2)
+

@@ -23,4 +23,27 @@ func TestDecoder(t *testing.T) {
 		assert.NoError(t, err)
 		printJson(dest)
 	}
+
+	// can use full-path
+	var dst map[string]any
+	path := "/Users/ipsusila/Workspaces/golang/crawler/pola/_data/sample.json"
+	err := pola.NewFsDecoder(path).Decode(&dst)
+	assert.NoError(t, err)
+
+	// different approach
+	clear(dst)
+	path = "_data/sample.yml"
+	err = pola.NewFsDecoder(path).Decode(&dst)
+	assert.NoError(t, err)
+
+	// cast type
+	clear(dst)
+	err = pola.FormattedTextFile(path).Decode(&dst)
+	assert.NoError(t, err)
+
+	clear(dst)
+	js := `{"debug": true, "packages": ["fmt", "io", "os"]}`
+	dec := pola.JsonText(js)
+	err = dec.Decode(&dst)
+	assert.NoError(t, err)
 }

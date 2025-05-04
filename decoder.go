@@ -1,7 +1,7 @@
 package pola
 
 import (
-	"encoding/gob"
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -28,7 +28,6 @@ const (
 	ExtToml    = ".toml"
 	ExtJsonnet = ".jsonnet"
 	ExtXml     = ".xml"
-	ExtGob     = ".gob"
 )
 
 var (
@@ -61,7 +60,12 @@ func NewFsDecoder(name string, fa ...fs.FS) Decoder {
 func (d *faDecoder) Decode(dest any) error {
 	fa := d.fa
 	if len(fa) == 0 {
-		fa = []fs.FS{os.DirFS(".")}
+		abs, err := filepath.Abs(d.name)
+		if err != nil {
+			return err
+		}
+		fa = []fs.FS{os.DirFS(filepath.Dir(abs))}
+		d.name = filepath.Base(d.name)
 	}
 
 	var errs error
@@ -90,6 +94,12 @@ type rdDecoder struct {
 	ext string
 }
 
+// NewBytesDecoder return decoder for given stream
+func NewBytesDecoder(data []byte, ext string) Decoder {
+	return NewDecoder(bytes.NewReader(data), ext)
+}
+
+// NewDecoder return decoder for given rider and ext type
 func NewDecoder(r io.Reader, ext string) Decoder {
 	return &rdDecoder{rdr: r, ext: ext}
 }
@@ -147,8 +157,6 @@ func (r *rdDecoder) Decode(dest any) error {
 		return r.decodeJsonnet(dest)
 	case ExtXml:
 		return xml.NewDecoder(r.rdr).Decode(dest)
-	case ExtGob:
-		return gob.NewDecoder(r.rdr).Decode(dest)
 	}
 	return ErrDecoderUnsupportedType
 }
