@@ -3,6 +3,7 @@ package pola
 import (
 	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -18,6 +19,15 @@ const (
 	IoDevNull = "/dev/null"
 	IoEmpty   = ""
 )
+
+// CurrentDirFS return fs.FS for current working directory
+func CurrentDirFS() (fs.FS, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	return os.DirFS(pwd), nil
+}
 
 // WriteCloser
 type nopWCloser struct {
@@ -365,4 +375,12 @@ func (cs *closers) Clear() {
 	cs.Lock()
 	cs.items = nil
 	cs.Unlock()
+}
+
+// check file exists
+func PathExists(path string) bool {
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	return false
 }
