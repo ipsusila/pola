@@ -19,6 +19,12 @@ func (f RunnerFunc) RunContext(ctx context.Context) error {
 	return f(ctx)
 }
 
+// InterruptibleFunc execute runner with given function
+func InterruptibleFunc(fn func(ctx context.Context) error, sigs ...os.Signal) error {
+	var rf RunnerFunc = fn
+	return InterruptibleContext(context.Background(), rf, sigs...)
+}
+
 // Interruptible execute Runner and cancel it when SIGINT is captured.
 // Here, context.Background is used as the parent context.
 // By default, the function listen to os.Interrupt and syscall.SIGINT,
